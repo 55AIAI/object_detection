@@ -239,6 +239,4 @@ GPU (CUDA) is supported automatically if available. The pipeline is fully functi
 
 ---
 
-## License
 
-MIT
