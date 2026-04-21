@@ -1,0 +1,19 @@
+# Model weights
+yolov8n.pt
+yolov8s.pt
+*.pt
+
+# CLIP cache (ViT-B/16 downloads here)
+~/.cache/clip/
+
+# Virtual environment
+venv/
+
+# Recordings
+recording_*.mp4
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
