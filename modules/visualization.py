@@ -15,7 +15,9 @@ def draw_detections(frame, detections, memory_snap, tracking, target_id, show_he
     if show_heatmap:
         overlay, alpha = tracking.get_heatmap_overlay()
         if overlay is not None:
-            cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+            mask = tracking.heatmap > 0
+            blended = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
+            frame[mask] = blended[mask]
 
     # Trajectories
     for tid, trail in tracking.trajectories.items():
@@ -36,8 +38,8 @@ def draw_detections(frame, detections, memory_snap, tracking, target_id, show_he
         _text(frame, "LINE", (pos + 4, 20), 0.45, (0, 200, 255))
 
     # Bounding boxes
-    for (x1, y1, x2, y2, tid, yolo_label) in detections:
-        label, conf = memory_snap.get(tid, (yolo_label, 1.0))
+    for (x1, y1, x2, y2, tid, yolo_label, yolo_conf) in detections:
+        label, conf = memory_snap.get(tid, (yolo_label, yolo_conf))
         is_target = (target_id is not None and tid == target_id)
 
         if is_target:
@@ -92,7 +94,7 @@ def draw_panel(frame, state, counts_snap, tracking):
     y += 4
     line(f"FPS:    {int(state.fps_display)}", (0, 255, 200))
     line(f"Device: {state.device.upper()}", (180, 180, 255))
-    line(f"Skip:   {state.yolo_skip}x", (180, 180, 180))
+    line("Input: latest frame", (180, 180, 180))
     line(f"Conf:   {state.conf_threshold:.2f}", (180, 180, 180))
     y += 6
 
@@ -100,7 +102,7 @@ def draw_panel(frame, state, counts_snap, tracking):
     statuses = []
     if state.paused:        statuses.append(("PAUSED",   (0, 80, 255)))
     if state.recording:     statuses.append(("REC",      (0, 0, 255)))
-    if not state.clip_module.enabled: statuses.append(("CLIP OFF", (80, 80, 80)))
+    if state.clip_module is None or not state.clip_module.enabled: statuses.append(("CLIP OFF", (80, 80, 80)))
     if state.show_heatmap:  statuses.append(("HEATMAP",  (0, 200, 180)))
     if state.target_id is not None: statuses.append((f"TGT:{state.target_id}", (0, 215, 255)))
 
@@ -128,7 +130,7 @@ def draw_panel(frame, state, counts_snap, tracking):
         "R:Reset  C:CLIP  H:Heat",
         "V:Record  L:Line",
         "+/-:Conf  ROI:drag mouse",
-        "Click:Select target  X:Clear",
+        "Ctrl+click:Target X:Clear",
     ]
     yh = h - len(hints) * 18 - 4
     for hint in hints:

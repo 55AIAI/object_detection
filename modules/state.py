@@ -1,47 +1,27 @@
+"""State owned by the UI thread; inference workers only publish result packets."""
 import threading
-from collections import defaultdict
 
 
 class AppState:
-    def __init__(self, device: str, frame_w: int, frame_h: int):
-        self.device = device
-        self.frame_w = frame_w
-        self.frame_h = frame_h
-        self.running = True
-
-        # Locks
-        self.frame_lock = threading.Lock()
-        self.memory_lock = threading.Lock()
-        self.detection_lock = threading.Lock()
-
-        # Shared data
-        self.latest_frame = None
+    def __init__(self, device, frame_w, frame_h):
+        self.device, self.frame_w, self.frame_h = device, frame_w, frame_h
+        self.memory_lock = threading.RLock()
+        self.detection_lock = threading.RLock()
         self.latest_detections = []
         self.object_memory = {}
-
-        # Modules (set after construction)
         self.clip_module = None
         self.tracking = None
-
-        # Controls
-        self.paused = False
-        self.fullscreen = False
-        self.recording = False
-        self.show_heatmap = False
-        self.clip_enabled = True
-
-        # Detection params
+        self.paused = self.fullscreen = self.recording = self.show_heatmap = False
         self.conf_threshold = 0.35
-        self.yolo_skip = 2
-
-        # FPS
         self.fps_display = 0.0
+        self.roi = self.target_id = self.video_writer = None
+        self.generation = 0
 
-        # ROI: (x1, y1, x2, y2) or None
-        self.roi = None
-
-        # Target lock
+    def invalidate(self):
+        """Discard pending inference after ROI, classifier, or reset changes."""
+        self.generation += 1
+        self.latest_detections = []
+        self.object_memory.clear()
         self.target_id = None
-
-        # Video writer
-        self.video_writer = None
+        if self.tracking:
+            self.tracking.reset()

@@ -1,242 +1,148 @@
-# YOLO + CLIP Real-Time Vision Pipeline
+# YOLO + CLIP Vision Pipeline
 
-A production-quality real-time computer vision system that combines **YOLOv8 object detection** with **OpenAI CLIP zero-shot classification** for accurate, low-latency object recognition from a live webcam feed.
+[![Vision checks](https://github.com/55AIAI/object_detection/actions/workflows/tests.yml/badge.svg)](https://github.com/55AIAI/object_detection/actions/workflows/tests.yml)
 
----
+A Python desktop vision project combining **YOLOv8 detection, ByteTrack IDs, trajectories,
+line crossing, an ROI, and optional OpenAI CLIP classification**. Works with a webcam or
+a local video. A synthetic demo exercises the full rendering and counting pipeline
+without a camera, neural-network weights, or network access.
 
-## Demo Features
+## Try the synthetic demo
 
-- Real-time bounding boxes with class labels, confidence scores, and track IDs
-- Object trajectory trails and movement direction (LEFT / RIGHT / UP / DOWN)
-- Line crossing counter per object class
-- Movement heatmap overlay
-- Region of Interest (ROI) selection via mouse
-- Video recording to MP4
-- Target object lock (Ctrl+Click)
-- Person alert system
-- Dynamic FPS optimization
-- Runtime confidence threshold control
-- CLIP on/off toggle
-- Clean side panel UI
-
----
-
-## How It Works — Theory
-
-### Stage 1: Object Detection with YOLOv8
-
-**YOLO** (You Only Look Once) is a single-stage object detection neural network. Unlike older two-stage detectors (like Faster R-CNN) that first propose regions and then classify them, YOLO solves detection in one forward pass through the network — which is what makes it fast enough for real-time use.
-
-#### Architecture
-
-YOLOv8 is built from three parts:
-
-```
-Input Frame
-    │
-    ▼
-┌─────────────┐
-│  Backbone   │  CSPDarknet — extracts feature maps at multiple scales
-│  (CSP)      │  Captures edges, textures, shapes, object parts
-└──────┬──────┘
-       │
-    ▼
-┌─────────────┐
-│    Neck     │  PANet (Path Aggregation Network)
-│  (PANet)    │  Fuses features from different depths — small and large objects
-└──────┬──────┘
-       │
-    ▼
-┌─────────────┐
-│    Head     │  Decoupled detection head
-│             │  Outputs: bounding box coords + objectness score + class probs
-└─────────────┘
-```
-
-#### How detection works
-
-The input frame is divided into a grid. Each grid cell predicts multiple bounding boxes (anchor-free in YOLOv8). For each box the network outputs:
-
-- `(cx, cy, w, h)` — center coordinates and dimensions
-- `objectness` — probability that any object exists here
-- `class vector` — probability distribution over 80 COCO classes
-
-Boxes with low objectness are discarded. The remaining overlapping boxes go through **Non-Maximum Suppression (NMS)** — only the highest-confidence box per object survives.
-
-#### Tracking with ByteTrack
-
-After detection, **ByteTrack** assigns persistent `track_id` integers to each detected object across frames. It works by solving an assignment problem: match detected boxes in the current frame to known tracks from the previous frame using **IoU** (Intersection over Union) as the matching cost. This gives each object a consistent ID across time — enabling trajectories, direction, and line crossing.
-
-#### In this project
-
-- Model: `yolov8s.pt` (small variant — good accuracy/speed balance on CPU)
-- Input resolution: **320×180** (downscaled from 1280×720 for speed)
-- Bounding boxes are scaled back to original resolution for display
-- YOLO runs in a **background thread** — the display loop never waits for it
-- Frame skip is adjusted **dynamically** to maintain target FPS (~25)
-
----
-
-### Stage 2: Zero-Shot Classification with CLIP
-
-**CLIP** (Contrastive Language–Image Pretraining) is a vision-language model trained by OpenAI on 400 million (image, text) pairs from the internet. It learns a shared embedding space where images and their text descriptions land near each other.
-
-#### Architecture
-
-CLIP has two encoders that are trained jointly:
-
-```
-Image ──► Image Encoder (ViT-B/16) ──► 512-dim vector
-                                              │
-                                        cosine similarity
-                                              │
-Text  ──► Text Encoder  (Transformer) ──► 512-dim vector
-```
-
-**ViT-B/16** (Vision Transformer, Base, 16×16 patch size) splits the input image into a grid of 16×16 pixel patches, treats each patch as a token, and runs a Transformer over all of them. This gives it global context that CNNs lack — it can reason about relationships between parts of the image.
-
-#### Training objective
-
-During training, CLIP is given a batch of N (image, text) pairs. It computes all N² cosine similarities between image and text embeddings. The loss pushes the N correct (image, text) pairs to have high similarity and all N²-N incorrect pairs to have low similarity. This is called **contrastive learning**.
-
-The result: CLIP learns rich visual representations aligned with natural language — without ever being trained on a fixed set of classes.
-
-#### Zero-shot inference
-
-At inference time, you can classify an image against **any set of text labels** — no fine-tuning needed:
-
-```
-1. Encode all candidate labels as text:
-   text_features = encode_text(["a photo of a person", "a photo of a car", ...])
-
-2. Encode the image:
-   image_features = encode_image(crop)
-
-3. Compute cosine similarities and softmax:
-   scores = softmax(image_features @ text_features.T)
-
-4. Highest score = predicted class
-```
-
-This is "zero-shot" because CLIP was never explicitly trained to classify these labels — it generalizes from its pretraining.
-
-#### In this project
-
-- Model: `ViT-B/16` — finer 16×16 patches for better spatial detail than ViT-B/32
-- Labels: all **80 COCO class names** (matches YOLO's vocabulary exactly)
-- Text features are **pre-encoded once at startup** and reused — zero runtime cost for text
-- Classification runs only when a new `track_id` appears, then every 60 frames
-- Multiple crops are **batched into one forward pass** per detection cycle
-- CLIP overrides the YOLO label only when confidence > 0.4; otherwise YOLO label is kept
-
----
-
-### Why Use Both?
-
-| | YOLO | CLIP |
-|---|---|---|
-| Speed | Very fast (single pass) | Slower (ViT forward pass) |
-| Training | Supervised on COCO (fixed 80 classes) | Self-supervised on 400M pairs |
-| Strengths | Precise boxes, fast localization | Rich semantics, handles ambiguity |
-| Weaknesses | Misclassifies visually similar objects | No localization ability |
-
-YOLO finds **where** objects are. CLIP decides **what** they really are. Together, YOLO provides bounding boxes and initial labels; CLIP re-examines each cropped region and can correct misclassifications that YOLO makes due to visual similarity or partial occlusion.
-
----
-
-## Project Structure
-
-```
-CLIP/
-├── yolo.py                  # Entry point — main loop
-├── requirements.txt
-└── modules/
-    ├── state.py             # Shared application state and locks
-    ├── clip_module.py       # CLIP model loading and batch inference
-    ├── detection.py         # YOLO background thread + dynamic frame skip
-    ├── tracking.py          # Trajectories, direction, heatmap, line crossing
-    ├── visualization.py     # All OpenCV drawing functions
-    └── controls.py          # Keyboard and mouse event handlers
-```
-
----
-
-## Installation
-
-**Requirements:** Python 3.9+, webcam
+Python 3.11–3.13. Run from the repository root:
 
 ```bash
 git clone https://github.com/55AIAI/object_detection.git
 cd object_detection
-
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
-
-pip install -r requirements.txt
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# Linux/macOS: source .venv/bin/activate
+python -m pip install -r requirements-core.txt
+python yolo.py --demo --headless --output output/demo.mp4 --report output/demo.json
 ```
 
-> On first run, `yolov8s.pt` and `ViT-B/16` weights download automatically (~100 MB total).
+The demo generates 90 frames with a moving green rectangle. Expected summary:
+90 processed frames and one `synthetic-box` crossing. Boxes are produced from the
+known synthetic color, **not YOLO**. The MP4 shows boxes, ID, trail, direction and
+counter. CI publishes the generated video/report in the `synthetic-demo` artifact.
 
----
-
-## Usage
+## Real models
 
 ```bash
-python yolo.py
+python -m pip install -r requirements.txt
+python yolo.py --source 0 --weights yolov8n.pt --download-weights
+python yolo.py --source 0 --weights yolov8n.pt --clip
+python yolo.py --source video.mp4 --weights yolov8n.pt --headless --output output/video.mp4 --report output/video.json
 ```
 
----
+The first command explicitly permits downloading YOLO weights; omit
+`--download-weights` to require an existing local checkpoint. Use trusted checkpoints.
+`--clip` explicitly loads ViT-B/16 and may download its substantially larger weights.
+Models are loaded only after the source opens and yields a frame. Nothing opens a
+camera or downloads weights when importing `yolo` or asking for `--help`.
+
+CPU is supported; `--device auto` selects CUDA when available. Install the appropriate
+[PyTorch build](https://pytorch.org/get-started/locally/) for your hardware.
+For a CPU-only install, install torch/torchvision from the official CPU index before
+installing requirements, as the CI workflow does.
+
+Sources are camera indices or existing local video files. Frame dimensions must stay
+constant, exceed 230 pixels wide, and be at least 240 pixels tall for the side panel.
+`--max-frames N` limits captured frames. Output files are never intentionally overwritten.
+MP4 writing requires an OpenCV build with a working `mp4v` encoder.
+
+## What was improved
+
+- A bounded latest-frame mailbox replaces the polling loop that repeatedly inferred
+  the same frame. Each submitted sequence is processed at most once.
+- Inference owns its models; the UI owns trajectories, counters, and rendering.
+  Published results carry their source frame, labels, sequence and settings generation.
+  Boxes are drawn on that exact source frame.
+- Reset, committed ROI changes, confidence changes, CLIP toggles and line changes
+  invalidate pending results. Tracker/cache state starts fresh on the next inference.
+- YOLO receives an aspect-preserving input through Ultralytics letterboxing.
+  ROI offsets and boxes are clipped to valid pixels.
+- Actual YOLO confidence is retained instead of displaying a fabricated 1.00.
+  Missing track IDs remain untracked and cannot share CLIP memory or crossing counts.
+- CLIP uses prompted text, normalized features and the learned logit scale.
+  Failures produce a warning and fall back to YOLO for that frame.
+- Camera, writer and worker cleanup happens even after errors. Recording starts only
+  if the codec opens successfully. Importing the entry point has no runtime effects.
 
 ## Controls
 
-| Key / Action | Function |
+| Key/action | Behavior |
 |---|---|
-| `Q` or `Esc` | Quit |
-| `P` | Pause / Resume |
-| `F` | Toggle fullscreen |
-| `R` | Reset all memory and counts |
-| `C` | Toggle CLIP classification on/off |
-| `H` | Toggle heatmap overlay |
-| `V` | Start / Stop video recording |
-| `L` | Cycle crossing line position |
-| `+` / `-` | Increase / decrease confidence threshold |
-| `X` | Clear ROI and target lock |
-| **Mouse drag** | Draw Region of Interest (ROI) |
-| **Right-click** | Clear ROI and target |
-| **Ctrl + Click** | Lock onto a specific object (target mode) |
+| Q / Esc | Exit |
+| P | Pause/resume |
+| F | Fullscreen |
+| R | Reset tracking, labels and counts |
+| C | Toggle an already loaded CLIP model |
+| H | Heatmap |
+| V | Record/stop annotated MP4 under `output/` |
+| L | Cycle crossing line and reset tracking/counts |
+| + / - | Confidence threshold; resets tracking/counts |
+| Mouse drag | Commit ROI on release |
+| Ctrl + click | Select a tracked object |
+| Right click / X | Clear ROI/target and reset tracking/counts |
 
----
+The rightmost 230 pixels are an overlaid control panel. ROI selection excludes it;
+full-frame detection still includes that image region. GUI recordings use a fixed
+20 FPS playback rate; headless output uses the source FPS when valid (20 otherwise).
+Processing time and output playback time are distinct.
 
-## Requirements
+## Semantics and limits
 
+The counter counts each ID **once per uninterrupted visible track lifetime**. A
+detection gap removes its trail/crossing memory; a reappearing ID starts a new lifetime
+and can be counted again. IDs are short-lived tracker identities, not identified people.
+
+The GUI prioritizes responsiveness and may drop pending frames. Crossing events can
+be missed with sparse/incorrect detections. Headless mode processes every readable
+frame sequentially and is preferable for reproducible file processing. A decoder
+failure after a valid frame is treated as end of input; no claim of complete file
+integrity is made.
+
+CLIP scores are relative softmax scores over the 80 COCO prompts, **not calibrated
+probabilities or verified corrections**. When enabled, a score above
+`--clip-threshold` (default 0.4) replaces the YOLO label. Otherwise YOLO stays.
+Reclassification happens on a new tracked ID and every 60 inference cycles.
+No accuracy gain, production readiness, hardware FPS, or safety-critical suitability
+is claimed. Real-camera behavior and GPU performance still need hardware evaluation.
+
+All video processing is local. Model downloads contact their upstream hosts.
+No input footage, model weights or real-person images are committed to this repository.
+
+## Validation
+
+```bash
+python -m unittest discover -s tests -v
+python -m tests.model_smoke  # full requirements + downloads; CPU compatibility check
 ```
-ultralytics
-opencv-python
-torch
-torchvision
-pillow
-git+https://github.com/openai/CLIP.git
-```
 
-GPU (CUDA) is supported automatically if available. The pipeline is fully functional on CPU.
+27 regression tests cover latest-frame behavior, failures and cleanup, ROI bounds,
+CLIP cache/fallback, real confidence, untracked IDs, count lifetimes, controls,
+import safety, and decoding the generated MP4. CI runs them on Python 3.11/3.12/3.13.
+A separate CI job loads real YOLOv8n and CLIP ViT-B/16 weights and runs synthetic pixels
+through both models. This tests integration, not recognition quality.
 
----
+Core and model dependencies have bounded version ranges; CLIP is fixed to a commit.
+The model CI artifact records the resolved environment. This is not a complete
+cross-platform lock file.
 
-## Performance Notes
+## Structure
 
-| Hardware | Expected FPS |
-|---|---|
-| CPU only | 15–25 FPS display / 5–10 FPS detection |
-| NVIDIA GPU (CUDA) | 30+ FPS display / 25+ FPS detection |
+- `yolo.py`: CLI, source lifecycle, rendering and sequential/interactive modes
+- `modules/detection.py`: YOLO adapter, CLIP policy, inference mailbox
+- `modules/clip_module.py`: OpenAI CLIP adapter
+- `modules/tracking.py`: trails, direction, heatmap, crossing counts
+- `modules/controls.py`, `state.py`, `visualization.py`: desktop controls and display
+- `modules/demo.py`: synthetic source and color-based boxes
+- `tests/`: regression and real-model smoke checks
+- [Design and validation notes](docs/design.md)
 
-- YOLO runs on a **320×180** downscaled frame for CPU efficiency
-- Frame skip auto-adjusts to maintain target FPS
-- CLIP batches all crops into a single forward pass per cycle
-- Background threading keeps the display loop decoupled from inference
+## Upstream projects
 
----
-
-
+[Ultralytics tracking](https://docs.ultralytics.com/modes/track/) and
+[OpenAI CLIP](https://github.com/openai/CLIP) provide the neural models and their
+own licenses. Review their license terms when redistributing or deploying models.

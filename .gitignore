@@ -17,3 +17,10 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+
+output/
+.test-tmp/
+.venv/
+.pytest_cache/
+*.avi
+*.mp4

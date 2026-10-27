@@ -3,7 +3,6 @@ import numpy as np
 from collections import defaultdict, deque
 
 MAX_TRAIL = 40       # max trajectory points per object
-MAX_MEMORY = 500     # max IDs in any memory dict
 
 
 class TrackingModule:
@@ -42,7 +41,9 @@ class TrackingModule:
             if len(trail) >= 2:
                 dx = trail[-1][0] - trail[-2][0]
                 dy = trail[-1][1] - trail[-2][1]
-                if abs(dx) > abs(dy):
+                if dx == 0 and dy == 0:
+                    self.directions[tid] = "STILL"
+                elif abs(dx) > abs(dy):
                     self.directions[tid] = "RIGHT" if dx > 0 else "LEFT"
                 else:
                     self.directions[tid] = "DOWN" if dy > 0 else "UP"
@@ -73,8 +74,7 @@ class TrackingModule:
                 del self.trajectories[tid]
                 self.directions.pop(tid, None)
 
-        if len(self.crossed_ids) > MAX_MEMORY:
-            self.crossed_ids = set(list(self.crossed_ids)[-MAX_MEMORY:])
+        self.crossed_ids.intersection_update(active_ids)
 
         # Decay heatmap
         self.heatmap *= (1.0 - self.heatmap_alpha)

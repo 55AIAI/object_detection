@@ -1,8 +1,6 @@
 import cv2
 import torch
-import clip
 import threading
-import numpy as np
 from PIL import Image
 
 COCO_LABELS = [
@@ -23,6 +21,7 @@ COCO_LABELS = [
 
 class CLIPModule:
     def __init__(self, device: str):
+        import clip
         self.device = device
         self.enabled = True
         self._lock = threading.Lock()
@@ -32,7 +31,7 @@ class CLIPModule:
         self.model.eval()
         self.labels = COCO_LABELS
 
-        tokens = clip.tokenize(self.labels).to(device)
+        tokens = clip.tokenize([f"a photo of a {label}" for label in self.labels]).to(device)
         with torch.no_grad():
             self.text_features = self.model.encode_text(tokens)
             self.text_features /= self.text_features.norm(dim=-1, keepdim=True)
@@ -52,7 +51,7 @@ class CLIPModule:
             with torch.no_grad():
                 feats = self.model.encode_image(imgs)
                 feats /= feats.norm(dim=-1, keepdim=True)
-                sims = (feats @ self.text_features.T).softmax(dim=-1)
+                sims = (self.model.logit_scale.exp() * feats @ self.text_features.T).softmax(dim=-1)
             out = []
             for i in range(len(crops)):
                 idx = sims[i].argmax().item()
