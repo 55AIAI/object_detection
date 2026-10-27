@@ -325,6 +325,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["processed_frames"], 1)
         detector.stop.assert_called_once()
 
+
+    def test_quit_while_paused_still_writes_report(self):
+        from modules.detection import Result
+        from modules.demo import SyntheticCapture
+        detector = Mock()
+        detector.latest.return_value = Result(1, 0, request().frame, (), {})
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "paused.json"
+            with patch("modules.demo.SyntheticCapture", return_value=SyntheticCapture(2)), \
+                 patch("yolo.DetectionModule", return_value=detector), \
+                 patch("cv2.namedWindow"), patch("cv2.setMouseCallback"), patch("cv2.imshow"), \
+                 patch("cv2.waitKey", side_effect=[ord("p"), ord("q")]), \
+                 patch("cv2.getWindowProperty", return_value=1), patch("cv2.destroyAllWindows"), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                result = yolo.run(yolo.parser().parse_args(["--demo", "--report", str(report)]))
+            self.assertEqual(result["captured_frames"], 1)
+            self.assertEqual(json.loads(report.read_text()), result)
+        detector.stop.assert_called_once()
+
     def test_invalid_options(self):
         for options in (["--confidence", "0"], ["--max-frames", "-1"],
                         ["--demo", "--clip"], ["--output", "unused.mp4"]):

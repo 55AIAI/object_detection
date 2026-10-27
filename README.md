@@ -120,7 +120,7 @@ python -m unittest discover -s tests -v
 python -m tests.model_smoke  # full requirements + downloads; CPU compatibility check
 ```
 
-27 regression tests cover latest-frame behavior, failures and cleanup, ROI bounds,
+28 regression tests cover latest-frame behavior, failures and cleanup, ROI bounds,
 CLIP cache/fallback, real confidence, untracked IDs, count lifetimes, controls,
 import safety, and decoding the generated MP4. CI runs them on Python 3.11/3.12/3.13.
 A separate CI job loads real YOLOv8n and CLIP ViT-B/16 weights and runs synthetic pixels

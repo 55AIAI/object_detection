@@ -148,12 +148,13 @@ def run(args):
                 state.video_writer.write(display)
             if not args.headless:
                 cv2.imshow(WINDOW, display)
-                if not controls.handle_key(cv2.waitKey(1) & 0xFF):
-                    break
-                while state.paused:
-                    if not controls.handle_key(cv2.waitKey(30) & 0xFF):
-                        return None
-                if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) < 1:
+                keep_going = controls.handle_key(cv2.waitKey(1) & 0xFF)
+                while keep_going and state.paused:
+                    if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) < 1:
+                        keep_going = False
+                        break
+                    keep_going = controls.handle_key(cv2.waitKey(30) & 0xFF)
+                if not keep_going or cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) < 1:
                     break
             if args.max_frames and captured >= args.max_frames:
                 break
