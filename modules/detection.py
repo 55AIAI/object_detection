@@ -1,5 +1,6 @@
 import cv2
 import threading
+import logging
 import time
 import numpy as np
 from ultralytics import YOLO
@@ -106,7 +107,7 @@ class DetectionModule:
                                     (clbl, conf) if conf > 0.4 else (ylbl, 1.0)
                                 )
                     except Exception:
-                        pass
+                        logging.exception("CLIP classification failed; retaining YOLO labels")
             else:
                 with s.memory_lock:
                     for bd in boxes_data:
